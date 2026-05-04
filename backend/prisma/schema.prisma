@@ -1,0 +1,179 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  USER
+}
+
+enum ProjectRole {
+  OWNER
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum UserStatus {
+  ACTIVE
+  BANNED
+  SUSPENDED
+}
+
+enum CollectionType {
+  JSON
+  FILE
+  TABLE
+}
+
+model User {
+  id            String     @id @default(uuid())
+  username      String     @unique
+  email         String     @unique
+  passwordHash  String     @map("password_hash")
+  role          Role       @default(USER)
+  status        UserStatus @default(ACTIVE)
+  storageLimit  BigInt     @default(1073741824) @map("storage_limit") // 1GB default
+  storageUsed   BigInt     @default(0) @map("storage_used")
+  lastLogin     DateTime?  @map("last_login")
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+
+  projects       ProjectMember[]
+  ownedProjects  Project[]
+  apiKeys        ApiKey[]
+  logs           Log[]
+  files          File[]
+
+  @@map("users")
+}
+
+model Project {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  ownerId     String   @map("owner_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  owner       User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  members     ProjectMember[]
+  collections Collection[]
+
+  @@map("projects")
+}
+
+model ProjectMember {
+  id        String      @id @default(uuid())
+  projectId String      @map("project_id")
+  userId    String      @map("user_id")
+  role      ProjectRole @default(VIEWER)
+  createdAt DateTime    @default(now()) @map("created_at")
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
+  @@map("project_members")
+}
+
+model Collection {
+  id        String         @id @default(uuid())
+  projectId String         @map("project_id")
+  name      String
+  type      CollectionType @default(JSON)
+  schema    Json?
+  createdAt DateTime       @default(now()) @map("created_at")
+  updatedAt DateTime       @updatedAt @map("updated_at")
+
+  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  dataItems DataItem[]
+
+  @@map("collections")
+}
+
+model DataItem {
+  id           String   @id @default(uuid())
+  collectionId String   @map("collection_id")
+  data         Json
+  fileUrl      String?  @map("file_url")
+  version      Int      @default(1)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  collection Collection    @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  versions   DataVersion[]
+
+  @@map("data_items")
+}
+
+model DataVersion {
+  id         String   @id @default(uuid())
+  dataItemId String   @map("data_item_id")
+  data       Json
+  version    Int
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  dataItem DataItem @relation(fields: [dataItemId], references: [id], onDelete: Cascade)
+
+  @@map("data_versions")
+}
+
+model File {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  filename     String
+  originalName String   @map("original_name")
+  mimeType     String   @map("mime_type")
+  size         BigInt
+  path         String
+  parentId     String?  @map("parent_id")
+  isFolder     Boolean  @default(false) @map("is_folder")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent   File?  @relation("FileTree", fields: [parentId], references: [id])
+  children File[] @relation("FileTree")
+
+  @@map("files")
+}
+
+model ApiKey {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  name        String
+  key         String   @unique
+  permissions Json     @default("[]")
+  lastUsed    DateTime? @map("last_used")
+  expiresAt   DateTime? @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("api_keys")
+}
+
+model Log {
+  id        String   @id @default(uuid())
+  userId    String?  @map("user_id")
+  action    String
+  resource  String?
+  details   Json?
+  ip        String?
+  userAgent String?  @map("user_agent")
+  timestamp DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([timestamp])
+  @@map("logs")
+}
